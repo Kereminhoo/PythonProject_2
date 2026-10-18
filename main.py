@@ -10,7 +10,6 @@ from backtest.engine import (
 )
 from backtest.metrics import PerformanceMetrics
 from backtest.yearly import (
-    BACKTEST_YEARS,
     build_yearly_report,
     format_profit_factor,
     get_year_date_range,
@@ -19,12 +18,16 @@ from backtest.yearly import (
 
 
 # ============================================================
-# BACKTEST SETTINGS
+# BACKTEST SETTINGS (SWING TRADING REVISION)
 # ============================================================
 
-INITIAL_CAPITAL = 10000.0
+# The Professor's target: Start small, protect capital, grow steadily.
+INITIAL_CAPITAL = 200.0
 
-SYSTEM_VERSION = "V1.8"
+SYSTEM_VERSION = "V2.0-Swing"
+
+# We override the years to test the 2022 Bear Market, 2023 Sideways/Recovery, and 2024/2025 Bull Market.
+TEST_YEARS = [2022, 2023, 2024, 2025]
 
 
 # ============================================================
@@ -310,7 +313,7 @@ def validate_trade_csv(
     print()
 
     print(
-        "[V1.8 TRADE METADATA VALIDATION]"
+        f"[{SYSTEM_VERSION} TRADE METADATA VALIDATION]"
     )
 
     print("-" * 60)
@@ -563,7 +566,7 @@ def print_yearly_report(report):
     print("=" * 60)
 
     print(
-        f"YEARLY BACKTEST {report.year} - "
+        f"YEARLY BACKTEST {report.year} "
         f"{SYSTEM_VERSION}"
     )
 
@@ -610,7 +613,7 @@ def print_yearly_report(report):
     print()
 
     print(
-        f"Profit net        : "
+        f"Net Profit        : "
         f"${report.net_profit:.2f}"
     )
 
@@ -625,17 +628,17 @@ def print_yearly_report(report):
     )
 
     print(
-        f"Drawdown maximal  : "
+        f"Max Drawdown      : "
         f"{report.max_drawdown_pct:.2f}%"
     )
 
     print(
-        f"Nombre de trades  : "
+        f"Number of trades  : "
         f"{report.total_trades}"
     )
 
     print(
-        f"Rendement annuel  : "
+        f"Annual Return     : "
         f"{report.annual_return_pct:.2f}%"
     )
 
@@ -650,7 +653,7 @@ def print_multi_year_summary(reports):
 
     print(
         f"MULTI-YEAR SUMMARY {SYSTEM_VERSION} "
-        f"({BACKTEST_YEARS[0]}-{BACKTEST_YEARS[-1]})"
+        f"({TEST_YEARS[0]}-{TEST_YEARS[-1]})"
     )
 
     print("=" * 60)
@@ -826,7 +829,7 @@ def main():
 
     print(
         f"Years             : "
-        f"{', '.join(str(year) for year in BACKTEST_YEARS)}"
+        f"{', '.join(str(year) for year in TEST_YEARS)}"
     )
 
     print(
@@ -844,7 +847,7 @@ def main():
 
     yearly_reports = []
 
-    for year in BACKTEST_YEARS:
+    for year in TEST_YEARS:
 
         start_date, end_date = (
             get_year_date_range(year)
@@ -978,7 +981,7 @@ def main():
             print()
 
             print(
-                f"[V1.8] {year}: export edilecek "
+                f"[{SYSTEM_VERSION}] {year}: export edilecek "
                 "trade bulunamadı."
             )
 

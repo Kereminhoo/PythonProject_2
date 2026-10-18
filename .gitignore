@@ -1,0 +1,16 @@
+# Güvenlik ve Çevresel Değişkenler
+.env
+
+# Python Ön Bellek Dosyaları (Gereksiz kalabalığı önler)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE Ayarları
+.idea/
+.vscode/
+
+# Veri ve Log Dosyaları (Her testte değişen dosyaların git'e gitmesini engeller)
+*.csv
+*.log
+trade_analytics.csv

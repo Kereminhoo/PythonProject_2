@@ -87,15 +87,33 @@ class MarketData:
         return df
 
     # ==================================================
-    # TIMEFRAME
+    # TIMEFRAME (SWING TRADING REVISION)
     # ==================================================
 
     def _timeframe(self):
+        """
+        Alpaca API limits minutes to 1-59.
+        If timeframe_minutes is 1440 or higher, switch to Daily timeframe.
+        """
+        minutes = self.settings.timeframe_minutes
 
-        return TimeFrame(
-            self.settings.timeframe_minutes,
-            TimeFrameUnit.Minute,
-        )
+        if minutes >= 1440:
+            days = minutes // 1440
+            return TimeFrame(
+                days,
+                TimeFrameUnit.Day,
+            )
+        elif minutes >= 60:
+            hours = minutes // 60
+            return TimeFrame(
+                hours,
+                TimeFrameUnit.Hour,
+            )
+        else:
+            return TimeFrame(
+                minutes,
+                TimeFrameUnit.Minute,
+            )
 
     # ==================================================
     # RECENT DATA
@@ -106,10 +124,11 @@ class MarketData:
         end_time = datetime.now(
             timezone.utc
         )
-
+        
+        # Extended fetch period for daily charts (Swing Trading needs more history)
         start_time = (
             end_time
-            - timedelta(days=5)
+            - timedelta(days=60) # Increased from 5 days to 60 days
         )
 
         frames = []

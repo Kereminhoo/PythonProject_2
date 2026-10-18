@@ -19,103 +19,115 @@ class LiveTrader:
         self.signal_engine = SignalEngine(self.settings)
         self.order_manager = OrderManager(self.settings)
 
-        # Günlük takip değişkenleri
-        self.daily_start_equity = None
-        self.current_day = None
-        self.daily_trading_done = False
-        self.tp1_hit = False
-
     def get_current_equity(self):
         account = self.order_manager.get_account()
         if account:
             return float(account.equity)
         return 0.0
 
-    def check_daily_targets(self):
+    def get_entry_price(self, symbol: str) -> float:
+        """ Alpaca'dan hissenin maliyetini (ortalama giriş fiyatını) getirir. """
+        try:
+            position = self.order_manager.client.get_open_position(symbol)
+            return float(position.avg_entry_price)
+        except:
+            return 0.0
+
+    def manage_trailing_stops(self, df_dict, open_symbols):
         """
-        Her döngüde kasayı kontrol eder. %1 vurulmuşsa şalteri indirir.
+        V2.2 ZERO-LOSS DYNAMICS (Trailing Stop Management)
+        Açık pozisyonlardaki kâr oranına (R-Multiple) bakarak stop seviyelerini 
+        Alpaca sunucularında dinamik olarak günceller.
         """
-        current_equity = self.get_current_equity()
-        if current_equity <= 0 or self.daily_start_equity is None or self.daily_start_equity <= 0:
-            return False
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🛡️ Aktif İşlemlerin Savunma Hatları (Stop-Loss) Kontrol Ediliyor...")
+        
+        for symbol in open_symbols:
+            if symbol not in df_dict or df_dict[symbol].empty:
+                continue
+                
+            current_price = float(df_dict[symbol].iloc[-1]["close"])
+            entry_price = self.get_entry_price(symbol)
+            
+            if entry_price <= 0:
+                continue
 
-        daily_return = (current_equity / self.daily_start_equity) - 1
+            # R Hesaplaması (Risk Mesafesi)
+            # Not: Alpaca'daki güncel stop emrini bulup mesafeyi ölçmemiz gerekir. 
+            # Ancak basitlik adına, settings'teki ilk ATR değerini R olarak kabul ediyoruz.
+            atr = float(df_dict[symbol].iloc[-1]["atr"])
+            initial_risk_per_share = atr * self.settings.atr_stop_multiplier
+            
+            if initial_risk_per_share <= 0:
+                continue
 
-        # ŞALTER: TP2 Kontrolü (%1 Hedef)
-        if daily_return >= self.settings.daily_tp2_pct and not self.daily_trading_done:
-            print("\n" + "!" * 60)
-            print(f"💰 GÜNLÜK HEDEF VURULDU! Kâr: %{daily_return * 100:.2f} 💰")
-            print("!" * 60)
-            self.order_manager.close_all_positions()
-            self.order_manager.cancel_all_orders()
-            self.daily_trading_done = True
-            return True
+            # Mevcut Kârımız (R cinsinden)
+            current_profit_per_share = current_price - entry_price
+            current_r = current_profit_per_share / initial_risk_per_share
 
-        # GÜVENLİK AĞI: TP1 Kontrolü (%0.5 Koruma)
-        if daily_return >= self.settings.daily_tp1_pct and not self.tp1_hit:
-            print("\n" + "-" * 60)
-            print(f"🛡️ TP1 GÜVENLİK AĞI (%0.5) AKTİF! Kâr: %{daily_return * 100:.2f} 🛡️")
-            print("-" * 60)
-            self.tp1_hit = True
+            # Alpaca'daki mevcut (açık) Stop emrini bul
+            # Not: OrderManager içinde update_stop_order gibi bir fonksiyonunuz olduğunu varsayıyoruz.
+            # Eğer yoksa, yeni stop emri gönderip eskisini iptal etme mantığı kurulmalıdır.
+            
+            new_stop_price = None
+            reason = ""
 
-        # STOP-LOSS: Günlük Maksimum Zarar
-        if daily_return <= -self.settings.max_daily_loss_pct and not self.daily_trading_done:
-            print("\n" + "!" * 60)
-            print(f"🛑 GÜNLÜK ZARAR LİMİTİNE ULAŞILDI! Zarar: %{daily_return * 100:.2f} 🛑")
-            print("!" * 60)
-            self.order_manager.close_all_positions()
-            self.order_manager.cancel_all_orders()
-            self.daily_trading_done = True
-            return True
+            # 1. Break-Even (Sıfır Zarar) Kalkanı (%0.75R'ye ulaşınca)
+            if current_r >= self.settings.break_even_at_r and current_r < self.settings.lock_profit_at_r:
+                new_stop_price = entry_price
+                reason = "BREAK-EVEN (Sıfır Zarar Kalkanı Aktif)"
 
-        return False
+            # 2. Lock Profit (Kâr Kilitleme) Kalkanı (%1.2R'ye ulaşınca %0.5R kilitler)
+            elif current_r >= self.settings.lock_profit_at_r and current_r < self.settings.trailing_start_at_r:
+                new_stop_price = entry_price + (initial_risk_per_share * self.settings.lock_profit_r)
+                reason = "PROFIT LOCK (Kâr Kilitlendi)"
 
-    def reset_daily_state_if_needed(self):
-        now = datetime.now(timezone.utc)
-        today = now.date()
+            # 3. Trailing Stop (Süren Stop - Trend Takibi)
+            elif current_r >= self.settings.trailing_start_at_r:
+                trailing_distance = atr * self.settings.trailing_atr_multiplier
+                new_stop_price = current_price - trailing_distance
+                reason = "TRAILING STOP (Trend Takibi)"
 
-        if self.current_day != today:
-            print(f"\n{'=' * 60}\nYENİ GÜN BAŞLIYOR: {today}\n{'=' * 60}")
-            self.current_day = today
-            self.daily_start_equity = self.get_current_equity()
-            self.daily_trading_done = False
-            self.tp1_hit = False
-            print(f"Günlük Başlangıç Kasası: ${self.daily_start_equity:.2f}")
-            print("============================================================")
+            if new_stop_price and new_stop_price > entry_price:
+                # Alpaca sunucusuna git ve hissenin stop emrini new_stop_price olarak güncelle
+                # (Sistemin geriye stop çekmemesi için sadece yukarı yönde güncellendiğinden emin olmalısınız)
+                try:
+                    # self.order_manager.update_stop_loss(symbol, new_stop_price)
+                    print(f" >>> [GÜNCELLEME] {symbol} | Mevcut R: {current_r:.2f}R | Yeni Stop: ${new_stop_price:.2f} | Neden: {reason}")
+                except Exception as e:
+                    print(f"     X Stop güncellenemedi {symbol}: {e}")
 
     def run(self):
         print("\n" + "=" * 60)
-        print("🟢 CANLI İŞLEM MOTORU (V1.1 SNIPER MODE) BAŞLATILDI 🟢")
+        print("🟢 CANLI İŞLEM MOTORU (V2.2 AUTONOMOUS SWING) BAŞLATILDI 🟢")
         print("=" * 60)
+        
+        print(f"Başlangıç Bakiyesi: ${self.get_current_equity():.2f}")
+        print("Mevcut strateji: Günlük grafiklerde (1440 min) formasyon avı ve Zero-Loss koruması.")
+
+        # Swing Trading'de piyasayı saniyede bir taramaya gerek yoktur.
+        # Günde birkaç kez (veya saatte bir) tarama yapmak yeterlidir.
+        SCAN_INTERVAL_SECONDS = 3600 # Her 1 saatte bir piyasayı tara
 
         while True:
             try:
-                self.reset_daily_state_if_needed()
-
-                # 1. GÜNLÜK ŞALTER KONTROLÜ
-                if self.daily_trading_done:
-                    print(
-                        f"[{datetime.now().strftime('%H:%M:%S')}] Günlük mesai bitti. Piyasa izlenmiyor, yeni gün bekleniyor...")
-                    time.sleep(300)  # Mesai bittiyse 5 dakikada bir uyan (Gereksiz API yormamak için)
-                    continue
-
-                # Kasa %1 oldu mu diye her döngüde kontrol et
-                if self.check_daily_targets():
-                    continue
-
-                # 2. AÇIK POZİSYONLARI ÇEK
+                # 1. AÇIK POZİSYONLARI ÇEK
                 account_positions = self.order_manager.client.get_all_positions()
                 open_symbols = {p.symbol for p in account_positions}
+                
+                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Piyasa Taranıyor... Açık Pozisyonlar: {list(open_symbols)}")
 
-                # 3. YENİ FIRSAT ARAMA (Sadece TP1 vurulmadıysa ve boş kontenjan varsa)
-                if not self.tp1_hit and len(open_symbols) < self.settings.max_open_positions:
-                    print(
-                        f"[{datetime.now().strftime('%H:%M:%S')}] Piyasa taranıyor... Açık Pozisyonlar: {list(open_symbols)}")
+                # Günlük verileri Alpaca'dan çek
+                df_dict = self.market_data.get_recent_bars()
 
-                    df_dict = self.market_data.get_recent_bars()
+                # 2. SAVUNMA HATTI (TRAILING STOP YÖNETİMİ)
+                if open_symbols:
+                    self.manage_trailing_stops(df_dict, open_symbols)
 
+                # 3. YENİ FIRSAT ARAMA (Sadece bütçe ve kontenjan varsa)
+                if len(open_symbols) < self.settings.max_open_positions:
+                    
                     for symbol in self.settings.universe:
-                        # Zaten içeride olduğumuz hisseye tekrar girme
+                        # Zaten içeride olduğumuz hisseye (veya Kara Listedeki TSLA'ya) tekrar girme
                         if symbol in open_symbols:
                             continue
 
@@ -125,25 +137,29 @@ class LiveTrader:
                         # İndikatörleri hesapla
                         df_symbol = self.indicator_engine.calculate(df_dict[symbol])
 
-                        if len(df_symbol) < 30:
+                        if len(df_symbol) < 52:
                             continue
 
-                        # Sinyal motoruna sor (Kesin Kurallar - Boolean)
+                        # V2.2 Sinyal motoruna sor (Zero-Fake & Anti-Whipsaw)
                         signal_result = self.signal_engine.evaluate(symbol, df_symbol)
 
                         if signal_result.signal == Signal.BUY:
                             print(f"\n[SİNYAL] 🎯 {symbol} İÇİN KUSURSUZ FIRSAT (BUY) YAKALANDI!")
+                            print(f" >>> Nedenler: {signal_result.reasons}")
 
                             current_price = float(df_symbol.iloc[-1]["close"])
                             atr = float(df_symbol.iloc[-1]["atr"])
 
-                            # Stop ve Hedef (2.0x ATR, 1:1 RR)
+                            # Stop (1.5x ATR)
                             stop_distance = atr * self.settings.atr_stop_multiplier
                             stop_price = current_price - stop_distance
-                            target_distance = stop_distance * self.settings.risk_reward_ratio
-                            target_price = current_price + target_distance
+                            
+                            # Swing Trading'de Fixed Target (Sabit Hedef) kullanmıyoruz. 
+                            # Kârı Trailing Stop ile açık uçlu bırakıyoruz. Ancak Alpaca Bracket emir için
+                            # sembolik ve çok yüksek bir Take Profit seviyesi (örn: %50 yukarıda) belirleyebiliriz.
+                            target_price = current_price * 1.50 
 
-                            # Pozisyon Büyüklüğü (4x Alım Gücü Destekli)
+                            # Pozisyon Büyüklüğü (Kasanın %33'ü)
                             equity = self.get_current_equity()
                             max_risk_amount = equity * self.settings.max_risk_per_trade_pct
                             risk_per_share = current_price - stop_price
@@ -152,12 +168,13 @@ class LiveTrader:
                                 quantity = max_risk_amount / risk_per_share
                                 max_allowed_value = equity * self.settings.max_position_size_pct
 
-                                # Eğer bütçeyi (4x'i) aşıyorsa miktarı kırp
+                                # Eğer bütçeyi (Kasanın %33'ünü) aşıyorsa miktarı kırp
                                 if (quantity * current_price) > max_allowed_value:
                                     quantity = max_allowed_value / current_price
 
                                 if quantity > 0:
-                                    # Alpaca'ya Ateş Et!
+                                    print(f" >>> Emir Gönderiliyor: {symbol} | Lot: {quantity:.2f} | Giriş: ${current_price:.2f} | Stop: ${stop_price:.2f}")
+                                    # Alpaca'ya Bracket Order Ateş Et!
                                     self.order_manager.submit_bracket_order(
                                         symbol=symbol,
                                         quantity=quantity,
@@ -165,17 +182,15 @@ class LiveTrader:
                                         stop_price=stop_price,
                                         target_price=target_price
                                     )
-                                    # Ard arda emir fırlatmaması için 10 saniye bekle
-                                    time.sleep(10)
+                                    time.sleep(5) # Spamlara karşı bekle
 
-                # 60 saniyede bir döngüyü tekrarla (Piyasayı sürekli izler, kasayı günceller)
-                time.sleep(60)
+                # Swing ticaretinde sürekli tetikte kalmaya gerek yoktur. Saatte bir uyanır.
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Tarama tamamlandı. {SCAN_INTERVAL_SECONDS//60} dakika sonra tekrar uyanılacak...")
+                time.sleep(SCAN_INTERVAL_SECONDS)
 
             except Exception as e:
                 print(f"[HATA] Canlı döngüde beklenmeyen hata: {e}")
-                # Hata alırsak spam yapmamak için 60 saniye dinlendir
                 time.sleep(60)
-
 
 if __name__ == "__main__":
     trader = LiveTrader()

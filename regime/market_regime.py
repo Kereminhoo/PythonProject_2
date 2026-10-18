@@ -32,7 +32,7 @@ class MarketRegimeResult:
 
 
 # ============================================================
-# MARKET REGIME ENGINE
+# MARKET REGIME ENGINE (SWING TRADING REVISION)
 # ============================================================
 
 class MarketRegimeEngine:
@@ -68,25 +68,26 @@ class MarketRegimeEngine:
         # ----------------------------------------------------
         # DATA LENGTH
         # ----------------------------------------------------
-
-        if df is None or len(df) < 30:
+        # Swing trading needs at least 50 bars to judge the regime properly
+        if df is None or len(df) < 50:
 
             return MarketRegimeResult(
                 regime=MarketRegime.UNKNOWN,
                 trend_score=0.0,
                 momentum_score=0.0,
                 volatility_score=0.0,
-                reason="Insufficient data.",
+                reason="Insufficient data. Need at least 50 bars.",
             )
 
         # ----------------------------------------------------
         # REQUIRED COLUMNS
         # ----------------------------------------------------
 
+        # We now rely on longer-term EMAs/SMAs calculated in indicator_engine
         required_columns = [
             "close",
-            "ema_9",
             "ema_21",
+            "ema_50",
             "atr",
             "return_3",
             "return_6",
@@ -118,16 +119,16 @@ class MarketRegimeEngine:
         last = df.iloc[-1]
 
         close = self._safe_float(last["close"])
-        ema_9 = self._safe_float(last["ema_9"])
         ema_21 = self._safe_float(last["ema_21"])
+        ema_50 = self._safe_float(last["ema_50"])
         atr = self._safe_float(last["atr"])
         return_3 = self._safe_float(last["return_3"])
         return_6 = self._safe_float(last["return_6"])
 
         values = [
             close,
-            ema_9,
             ema_21,
+            ema_50,
             atr,
             return_3,
             return_6,
@@ -149,10 +150,10 @@ class MarketRegimeEngine:
 
         trend_score = 0.0
 
-        if close > ema_21:
+        if close > ema_50:
             trend_score += 1.0
 
-        if ema_9 > ema_21:
+        if ema_21 > ema_50:
             trend_score += 1.0
 
         # ====================================================
@@ -180,10 +181,11 @@ class MarketRegimeEngine:
         volatility_score = volatility_ratio * 100.0
 
         # ====================================================
-        # HIGH VOLATILITY
+        # HIGH VOLATILITY (ADJUSTED FOR DAILY BARS)
         # ====================================================
-
-        if volatility_ratio >= 0.01:
+        
+        # 0.04 = 4% daily ATR. If SPY moves 4% a day, the market is in panic mode.
+        if volatility_ratio >= 0.04:
 
             return MarketRegimeResult(
                 regime=MarketRegime.HIGH_VOLATILITY,
@@ -191,8 +193,8 @@ class MarketRegimeEngine:
                 momentum_score=momentum_score,
                 volatility_score=volatility_score,
                 reason=(
-                    "ATR relative to price indicates "
-                    "high volatility."
+                    "ATR relative to price (>4%) indicates "
+                    "extreme high volatility panic mode."
                 ),
             )
 
@@ -211,8 +213,8 @@ class MarketRegimeEngine:
                 momentum_score=momentum_score,
                 volatility_score=volatility_score,
                 reason=(
-                    "Price/EMA trend is bullish "
-                    "with positive momentum."
+                    "Price > 50 EMA and 21 EMA > 50 EMA. "
+                    "Macro trend is bullish."
                 ),
             )
 
@@ -222,9 +224,9 @@ class MarketRegimeEngine:
 
         if (
             trend_score == 0.0
-            and momentum_score == 0.0
-            and close < ema_21
-            and ema_9 < ema_21
+            and momentum_score <= 1.0
+            and close < ema_50
+            and ema_21 < ema_50
         ):
 
             return MarketRegimeResult(
@@ -233,8 +235,8 @@ class MarketRegimeEngine:
                 momentum_score=momentum_score,
                 volatility_score=volatility_score,
                 reason=(
-                    "Price and EMA trend are bearish "
-                    "with negative momentum."
+                    "Price < 50 EMA and 21 EMA < 50 EMA. "
+                    "Macro trend is bearish."
                 ),
             )
 
@@ -248,7 +250,7 @@ class MarketRegimeEngine:
             momentum_score=momentum_score,
             volatility_score=volatility_score,
             reason=(
-                "Trend and momentum are not "
-                "strong enough for a directional regime."
+                "Trend and momentum are mixed. "
+                "Market is in a sideways or transition phase."
             ),
         )

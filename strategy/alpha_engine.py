@@ -34,7 +34,7 @@ class AlphaResult:
 
 
 # ============================================================
-# COMBINED ALPHA ENGINE
+# COMBINED ALPHA ENGINE (SWING TRADING REVISION)
 # ============================================================
 
 class CombinedAlphaEngine:
@@ -64,11 +64,12 @@ class CombinedAlphaEngine:
         Regime adjustment is applied exactly once here.
     """
 
-    DEFAULT_TECHNICAL_WEIGHT = 0.65
-    DEFAULT_FUNDAMENTAL_WEIGHT = 0.35
+    # For Swing Trading, Technicals drive the decision. Fundamentals are just a bonus.
+    DEFAULT_TECHNICAL_WEIGHT = 0.85 
+    DEFAULT_FUNDAMENTAL_WEIGHT = 0.15
 
     REGIME_ADJUSTMENTS = {
-        "BULL": 5.0,
+        "BULL": 10.0,      # Boosted for Swing Trading
         "SIDEWAYS": 0.0,
         "HIGH_VOLATILITY": -5.0,
         "BEAR": -15.0,
@@ -82,7 +83,8 @@ class CombinedAlphaEngine:
         self,
         technical_weight: float = DEFAULT_TECHNICAL_WEIGHT,
         fundamental_weight: float = DEFAULT_FUNDAMENTAL_WEIGHT,
-        minimum_data_quality: float = 60.0,
+        # Lowered significantly. We don't want to miss a great technical setup just because a company missed one balance sheet metric.
+        minimum_data_quality: float = 20.0, 
     ):
 
         if (
@@ -143,24 +145,10 @@ class CombinedAlphaEngine:
     def _normalize_regime(
         regime,
     ) -> str:
-        """
-        Supports:
-
-            "BULL"
-            "bull"
-            MarketRegime.BULL
-            MarketRegimeResult(...)
-            objects exposing .value
-            objects exposing .regime
-        """
 
         if regime is None:
 
             return "UNKNOWN"
-
-        # ----------------------------------------------------
-        # Direct enum
-        # ----------------------------------------------------
 
         if hasattr(
             regime,
@@ -178,10 +166,6 @@ class CombinedAlphaEngine:
             return str(
                 value
             ).upper()
-
-        # ----------------------------------------------------
-        # Result object exposing .regime
-        # ----------------------------------------------------
 
         if hasattr(
             regime,
@@ -205,18 +189,10 @@ class CombinedAlphaEngine:
                 nested_regime
             ).upper()
 
-        # ----------------------------------------------------
-        # String / fallback
-        # ----------------------------------------------------
-
         normalized = str(
             regime
         ).upper()
 
-        # Handle strings such as:
-        #
-        # MARKETREGIME.BULL
-        #
         if "." in normalized:
 
             normalized = (
@@ -279,7 +255,7 @@ class CombinedAlphaEngine:
             )
 
         # ====================================================
-        # DATA QUALITY
+        # DATA QUALITY (RELAXED FOR SWING)
         # ====================================================
 
         quality_ok = True
@@ -314,10 +290,10 @@ class CombinedAlphaEngine:
             )
 
         # ====================================================
-        # BASE SCORE
+        # BASE SCORE (TECH HEAVY)
         # ====================================================
 
-        if fundamental_available:
+        if fundamental_available and quality_ok:
 
             base_score = (
                 technical_score
@@ -329,14 +305,11 @@ class CombinedAlphaEngine:
 
         else:
 
-            # No fundamental evidence.
-            #
-            # Do NOT punish the stock by treating missing
-            # fundamental data as score=0.
-            #
-            # Instead use technical alpha as fallback.
-
+            # Even if fundamentals are available but data quality is low,
+            # we don't reject the trade anymore. We just fall back to 100% Technical.
             base_score = technical_score
+            alpha_mode = self.ALPHA_MODE_TECHNICAL_FALLBACK
+            fundamental_available = False # Treat as fallback
 
         # ====================================================
         # FINAL SCORE
@@ -348,17 +321,12 @@ class CombinedAlphaEngine:
         )
 
         # ====================================================
-        # ELIGIBILITY
+        # ELIGIBILITY (NEVER REJECT A GOOD TECHNICAL SETUP)
         # ====================================================
-
-        if fundamental_available:
-
-            eligible = quality_ok
-
-        else:
-
-            # Technical fallback is allowed.
-            eligible = True
+        
+        # In Swing Trading, if the technical trend is strong, we trade it.
+        # We no longer reject trades solely because of bad fundamental data quality.
+        eligible = True 
 
         # ====================================================
         # EXPLANATION
@@ -394,9 +362,14 @@ class CombinedAlphaEngine:
                 "technical fallback"
             )
 
-            reasons.append(
-                "fundamental data unavailable"
-            )
+            if not quality_ok:
+                 reasons.append(
+                    "fundamental data quality too low, using pure technicals"
+                )
+            else:
+                reasons.append(
+                    "fundamental data unavailable"
+                )
 
         # ----------------------------------------------------
         # Regime
@@ -426,18 +399,6 @@ class CombinedAlphaEngine:
                 "sideways regime"
             )
 
-        # ----------------------------------------------------
-        # Data quality
-        # ----------------------------------------------------
-
-        if (
-            fundamental_available
-            and not quality_ok
-        ):
-
-            reasons.append(
-                "insufficient fundamental data quality"
-            )
 
         # ----------------------------------------------------
         # Eligibility

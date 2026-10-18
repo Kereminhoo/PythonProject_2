@@ -33,11 +33,12 @@ class BacktestConfig:
     config.settings.Settings'tir.
     """
 
-    initial_capital: float = 100.0
+    # 100-200 Euro/Dolar bandındaki başlangıç hedefimiz
+    initial_capital: float = 200.0
 
 
 # ============================================================
-# BACKTEST ENGINE V1.8
+# BACKTEST ENGINE V2.0 (SWING TRADING REVISION)
 # ============================================================
 
 class BacktestEngine:
@@ -555,7 +556,7 @@ class BacktestEngine:
                 symbol_df.loc[:timestamp]
             )
 
-            if len(history) < 30:
+            if len(history) < 50: # Changed to 50 for Swing Trading EMA 50
                 continue
 
             # ------------------------------------------------
@@ -1033,14 +1034,6 @@ class BacktestEngine:
                 is not None
             )
 
-        # Try to obtain the factor from context.
-        #
-        # The normal ranked-candidate path does not pass it into
-        # this method, so we retrieve it point-in-time only when
-        # needed for analytics.
-        #
-        # This does not affect the trading decision.
-
         fundamental_factor = None
 
         if (
@@ -1088,7 +1081,7 @@ class BacktestEngine:
         )
 
         # ----------------------------------------------------
-        # ENTRY METRICS
+        # ENTRY METRICS (SWING TRADING REVISION)
         # ----------------------------------------------------
 
         last_bar = history.iloc[-1]
@@ -1100,83 +1093,39 @@ class BacktestEngine:
             # =================================================
 
             "rsi": (
-                float(
-                    last_bar["rsi"]
-                )
-                if (
-                    "rsi" in last_bar
-                    and pd.notna(
-                        last_bar["rsi"]
-                    )
-                )
+                float(last_bar["rsi"])
+                if ("rsi" in last_bar and pd.notna(last_bar["rsi"]))
                 else 0.0
             ),
 
             "volume_ratio": (
-                float(
-                    last_bar[
-                        "volume_ratio"
-                    ]
-                )
-                if (
-                    "volume_ratio"
-                    in last_bar
-                    and pd.notna(
-                        last_bar[
-                            "volume_ratio"
-                        ]
-                    )
-                )
+                float(last_bar["volume_ratio"])
+                if ("volume_ratio" in last_bar and pd.notna(last_bar["volume_ratio"]))
                 else 0.0
             ),
 
             "macd": (
-                float(
-                    last_bar["macd"]
-                )
-                if (
-                    "macd" in last_bar
-                    and pd.notna(
-                        last_bar["macd"]
-                    )
-                )
+                float(last_bar["macd"])
+                if ("macd" in last_bar and pd.notna(last_bar["macd"]))
                 else 0.0
             ),
 
             "macd_histogram": (
-                float(
-                    last_bar[
-                        "macd_histogram"
-                    ]
-                )
-                if (
-                    "macd_histogram"
-                    in last_bar
-                    and pd.notna(
-                        last_bar[
-                            "macd_histogram"
-                        ]
-                    )
-                )
+                float(last_bar["macd_histogram"])
+                if ("macd_histogram" in last_bar and pd.notna(last_bar["macd_histogram"]))
                 else 0.0
             ),
 
-            "price_vs_vwap": (
-                float(
-                    last_bar[
-                        "price_vs_vwap"
-                    ]
-                )
-                if (
-                    "price_vs_vwap"
-                    in last_bar
-                    and pd.notna(
-                        last_bar[
-                            "price_vs_vwap"
-                        ]
-                    )
-                )
+            "price_vs_ema50": (
+                float(last_bar["price_vs_ema50"])
+                if ("price_vs_ema50" in last_bar and pd.notna(last_bar["price_vs_ema50"]))
                 else 0.0
+            ),
+            
+            "volume_breakout": (
+                bool(last_bar["volume_breakout"])
+                if ("volume_breakout" in last_bar and pd.notna(last_bar["volume_breakout"]))
+                else False
             ),
 
             "atr": atr,
@@ -2293,12 +2242,6 @@ class BacktestEngine:
                     if (
                             len(self.portfolio.positions)
                             >= max_open_positions
-                    ):
-                        break
-
-                    if (
-                        len(self.portfolio.positions)
-                        >= max_open_positions
                     ):
                         break
 
