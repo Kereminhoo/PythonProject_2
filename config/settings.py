@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ============================================================
-# SETTINGS V2.2 (ZERO-LOSS SWING TRADING REVISION)
+# SETTINGS V3.0 (HIGH-VELOCITY COMPOUNDING ENGINE)
 # ============================================================
 
 @dataclass(frozen=True)
@@ -21,129 +21,122 @@ class Settings:
     paper_trading: bool = True
 
     # ========================================================
-    # MARKET (SWING TRADING ADJUSTMENTS)
+    # MARKET (HIGH-BETA SWING UNIVERSE)
     # ========================================================
 
-    # 1 Day = 1440 Minutes. Swing Trading requires daily data.
     timeframe_minutes: int = 1440
 
-    # Focused Tech & Stable Growth Universe for Momentum Swing Trading
+    # Hantal hisseler (AAPL, MSFT, AMZN, UBER, CRWD) çıkarıldı.
+    # Sadece yüksek momentum ve yüksek R-Multiple üreten liderler + SPY (Rejim için)
     universe: tuple = (
-        "AAPL",
-        "MSFT",
         "NVDA",
-        "AMZN",
+        "AMD",
+        "PLTR",
+        "QCOM",
         "META",
         "GOOGL",
-        "AMD",
-        "QCOM",
-        "PLTR", 
-        "CRWD", 
-        "UBER", 
         "HOOD",
-        "SPY", # MARKET REGIME İÇİN ŞART!
+        "AVGO",  # Yarı iletken lideri - Yüksek Trend Kalitesi
+        "MU",    # Güçlü Swing dalgaları
+        "ANET",  # AI Altyapı lideri - Temiz kırılımlar
+        "PANW",  # Siber güvenlik lideri (CRWD yerine)
+        "COIN",  # Kripto/Fintech yüksek Beta patlamaları
+        "SPY",   # SADECE MARKET REGIME İÇİN (Alım-Satıma kapatılacak)
     )
+
+    # İşlem yapılması yasak olan (Sadece referans/endeks) semboller
+    non_tradable_symbols: tuple = ("SPY", "TSLA")
 
     universe_batch_size: int = 25
 
     # ========================================================
-    # DAILY PROFIT MANAGEMENT
+    # DAILY PROFIT MANAGEMENT (SWING'DE KAPALI)
     # ========================================================
     
-    # In Swing Trading, daily TP is irrelevant. We ride the trend.
     daily_tp1_pct: float = 0.005
     daily_tp2_pct: float = 0.010
     daily_tp1_enabled: bool = False
     daily_tp2_enabled: bool = False
 
     # ========================================================
-    # RISK MANAGEMENT (ZERO-LOSS REVISION)
+    # AGGRESSIVE RISK & POSITION SIZING (V3.0)
     # ========================================================
 
-    # İşlem başına riski tekrar altın orana (%1.5) çekiyoruz
-    max_risk_per_trade_pct: float = 0.015
+    # Baz işlem riski %1.5'ten %2.25'e çıkarıldı (Drawdown'ımız sadece %6 olduğu için güvenli alanımız geniş)
+    max_risk_per_trade_pct: float = 0.0225
 
-    # Aynı anda 3 hissede en fazla %4.5 açık risk
-    max_total_open_risk_pct: float = 0.045
+    # Dinamik Alpha Riski (Elit sinyallerde mermiyi büyütür)
+    use_dynamic_risk: bool = True
+    high_alpha_threshold: float = 85.0
+    high_alpha_risk_pct: float = 0.0325  # 85+ Alpha skorunda %3.25 risk
 
-    # Günlük maksimum kayıp limiti %3
-    max_daily_loss_pct: float = 0.03
+    # Toplam açık risk limiti (%9.0 - 3 güçlü pozisyona tam izin verir)
+    max_total_open_risk_pct: float = 0.090
 
-    # Sermayeyi 3 hisseye yoğunlaştırıyoruz (%33'lük dev pozisyonlar)
-    max_position_pct: float = 0.33
-    max_position_size_pct: float = 0.33
+    # Günlük maksimum kayıp limiti %4.5
+    max_daily_loss_pct: float = 0.045
 
-    # Odaklanılmış 3 kaliteli işlem
+    # KRİTİK FREN KALDIRILDI: %33 sınırı %55'e çıkarıldı!
+    # Artık pozisyon büyüklüğü tırpanlanmayacak, gerçek R riski alınabilecek.
+    max_position_pct: float = 0.55
+    max_position_size_pct: float = 0.55
+
+    # Aynı anda maksimum 3 odaklanmış pozisyon
     max_open_positions: int = 3
 
     # ========================================================
-    # INITIAL STOP
+    # INITIAL STOP & FIXED TARGET
     # ========================================================
 
-    # Stop mesafesini biraz daraltıyoruz (Daha büyük lot açabilmek için)
     atr_stop_multiplier: float = 1.5 
-
-    # ========================================================
-    # FIXED TARGET
-    # ========================================================
 
     risk_reward_ratio: float = 1.0
     use_fixed_target: bool = False
 
     # ========================================================
-    # V2 TRAILING STOP (ZERO-LOSS / FAST LOCK)
+    # V3.0 SMART TRAILING & PARABOLIC LOCK
     # ========================================================
 
-    # Hisse sadece %75 (0.75R) kâra geçtiği anda stop'u giriş fiyatına (başa baş) çeker!
-    break_even_at_r: float = 0.75 
+    # 0.70R'ye ulaşıldığında stop'u 0.0R'ye değil, +0.20R kâra çeker! (37 işlemi kârlı kapatır)
+    break_even_at_r: float = 0.70 
+    break_even_offset_r: float = 0.20
 
-    # +1.2R kâr gördüğümüzde kârın en az 0.5R'sini cebe kilitliyoruz
-    lock_profit_at_r: float = 1.2
-    lock_profit_r: float = 0.5
+    # +1.2R kârda 0.65R'yi cebe kilitler
+    lock_profit_at_r: float = 1.20
+    lock_profit_r: float = 0.65
 
-    # ATR Trailing (Trend takibi) çok daha erken devreye girer
-    trailing_start_at_r: float = 1.5
-    trailing_atr_multiplier: float = 1.5
+    # Trend takibi (+1.5R'de başlar)
+    trailing_start_at_r: float = 1.50
+    trailing_atr_multiplier: float = 1.40
+
+    # Parabolik Sıkılaştırma (RSI > 75 olduğunda kârı zirvede kilitlemek için daraltılmış ATR)
+    parabolic_rsi_threshold: float = 75.0
+    parabolic_atr_multiplier: float = 0.85
 
     trailing_only_moves_up: bool = True
 
     # ========================================================
-    # STRATEGY (DAILY CHART PARAMETERS)
+    # STRATEGY (SELECTIVE SNIPER)
     # ========================================================
 
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
     
-    # 20-day SMA for volume is standard for daily charts
     volume_sma_period: int = 20
 
-    minimum_buy_score: int = 60
+    # Kalitesiz işlemleri elemek için minimum skor 60'tan 68'e çıkarıldı
+    minimum_buy_score: int = 68
 
     # ========================================================
-    # MARKET REGIME
+    # MARKET REGIME & TRADE MANAGEMENT
     # ========================================================
 
     block_bear_market: bool = True
-
-    # ========================================================
-    # TRADE MANAGEMENT
-    # ========================================================
-
-    # Wait 1 day before re-entering the same stock after an exit
     cooldown_bars: int = 1
 
-    # ========================================================
-    # MICRO ACCOUNT
-    # ========================================================
-
-    # Küçük hesap limitlerini tamamen kapatıyoruz
     micro_account_mode: bool = False
     micro_max_open_positions: int = 1
-
-    # ========================================================
-    # EXECUTION SAFETY
-    # ========================================================
 
     allow_fractional_shares: bool = True
 
