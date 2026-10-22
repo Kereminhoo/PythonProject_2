@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ============================================================
-# SETTINGS V3.8 (ALL-WEATHER FORTRESS & 1200$+ TARGET)
+# SETTINGS V4.0 (ADAPTIVE CHAMELEON & MULTI-SECTOR EDITION)
 # ============================================================
 
 @dataclass(frozen=True)
@@ -17,6 +17,7 @@ class Settings:
 
     timeframe_minutes: int = 1440
 
+    # Teknoloji Liderleri + 2022 Krizinde Ralli Yapan Sağlık (LLY) ve Enerji (XOM) Devleri!
     universe: tuple = (
         "NVDA",
         "AMD",
@@ -28,10 +29,13 @@ class Settings:
         "MU",
         "ANET",
         "COIN",
+        "LLY",   # Sağlık/İlaç Lideri (2022 Ayı Piyasasında ve 2023-2024'te Dev Ralli!)
+        "XOM",   # Enerji Lideri (2022 Enflasyon/Faiz Krizinde +%80 Ralli!)
         "SPY",   # Sadece Market Regime için
     )
 
     non_tradable_symbols: tuple = ("SPY", "TSLA")
+    defensive_symbols: tuple = ("LLY", "XOM", "UNH")
     universe_batch_size: int = 25
 
     daily_tp1_pct: float = 0.005
@@ -40,11 +44,11 @@ class Settings:
     daily_tp2_enabled: bool = False
 
     # ========================================================
-    # FULL-THROTTLE COMPOUNDING RISK (V3.8)
+    # BASE RISK & EXPOSURE (ADAPTIVE ENGINE TARAFINDAN YÖNETİLİR)
     # ========================================================
 
-    max_risk_per_trade_pct: float = 0.050
-    max_total_open_risk_pct: float = 0.180
+    max_risk_per_trade_pct: float = 0.0525
+    max_total_open_risk_pct: float = 0.185
     max_daily_loss_pct: float = 0.085
 
     max_position_pct: float = 0.85
@@ -57,28 +61,22 @@ class Settings:
     use_fixed_target: bool = False
 
     # ========================================================
-    # V3.8 ADAPTIVE TRAILING STOP (SAVES 0.65R+ & RIDES 2024/2025)
+    # BASE TRAILING STOP (VİTESLERE GÖRE DİNAMİK ESNER)
     # ========================================================
 
-    # 0.65R gören işlem (AVGO +0.70R, COIN +0.69R) asla -1R zarar yazamaz!
-    # Doğrudan +0.20R pozitif kâra kilitlenir!
-    break_even_at_r: float = 0.65 
+    break_even_at_r: float = 0.75 
     break_even_offset_r: float = 0.20
 
-    # +1.28R'de +0.70R kârı cebe kilitler
-    lock_profit_at_r: float = 1.28
+    lock_profit_at_r: float = 1.30
     lock_profit_r: float = 0.70
 
-    # +1.70R'de ATR Trailing başlar
     trailing_start_at_r: float = 1.70
     trailing_atr_multiplier: float = 1.45
 
-    # Parabolik Zirve Kilidi ($755+ PnL üreten altın eşik: RSI 77.0)
     parabolic_rsi_threshold: float = 77.0
     parabolic_atr_multiplier: float = 0.85
 
-    # Zaman Stobu: 6 gün sonunda hâlâ Break-Even olamamış ve eksedeki ölü işlemleri keser
-    time_stop_bars: int = 6
+    time_stop_bars: int = 7
 
     trailing_only_moves_up: bool = True
 

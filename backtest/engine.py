@@ -178,20 +178,23 @@ class BacktestEngine:
             return default
         return getattr(factor, name, default)
 
-    def build_ranked_candidates(self, timestamp, next_timestamp, prepared_data):
-        candidates = []
+    # ========================================================
+    # V4.0 CHAMELEON STATE DETECTOR (3 OTOMATİK VİTES)
+    # ========================================================
 
+    def detect_market_gear(self, timestamp, prepared_data):
+        """
+        Piyasanın o günkü röntgenini çeker ve 3 vitesten birini seçer:
+        1. 'BEAR_DEFENSE' (2022 Modu - Sadece Defansif/Sağlık/Enerji veya Ultra-Liderler)
+        2. 'CHOP_SNIPER'  (2023 V3.8 Modu - Sıkı Filtre + Hızlı Kâr Kilidi)
+        3. 'SUPER_BULL'   (2024/2025 V3.7 Modu - +%200'lük Tam Güç Mega-Trend)
+        """
         non_tradable = set(
             getattr(self.settings, "non_tradable_symbols", ("SPY", "TSLA"))
         )
 
-        # ====================================================
-        # 1. SEKTÖR GENİŞLİĞİ (UNIVERSE BREADTH) HESABI
-        # ====================================================
-        # Sadece SPY'a bakmak 2022/2023 teknoloji çöküşlerinde yanıltıcıdır.
-        # Evrenimizdeki hisselerin kaç tanesi kendi EMA 50'sinin üzerinde ve yükselen trendde?
-        active_universe_count = 0
-        bullish_universe_count = 0
+        active_count = 0
+        bullish_count = 0
 
         for sym, sym_df in prepared_data.items():
             if sym.upper() in non_tradable or timestamp not in sym_df.index:
@@ -199,23 +202,17 @@ class BacktestEngine:
             hist = sym_df.loc[:timestamp]
             if len(hist) < 52:
                 continue
-            active_universe_count += 1
+            active_count += 1
             last_row = hist.iloc[-1]
             if float(last_row.get("price_vs_ema50", -1.0)) > 0 and float(last_row["ema_21"]) > float(last_row["ema_50"]):
-                bullish_universe_count += 1
+                bullish_count += 1
 
-        universe_breadth = (
-            bullish_universe_count / active_universe_count
-            if active_universe_count > 0
-            else 0.0
-        )
+        breadth = (bullish_count / active_count) if active_count > 0 else 0.0
 
-        # ====================================================
-        # 2. SPY MACRO REGIME & 2022 BEAR LOCKOUT
-        # ====================================================
         market_regime = None
         market_regime_result = None
-        spy_in_bear_trend = False
+        spy_in_bear_structure = False
+        spy_strong_bull = False
 
         benchmark_df = prepared_data.get("SPY")
         if benchmark_df is not None and timestamp in benchmark_df.index:
@@ -229,35 +226,62 @@ class BacktestEngine:
                 closes = benchmark_history["close"]
                 if len(closes) >= 85:
                     spy_close = float(closes.iloc[-1])
+                    spy_high_85 = float(closes.iloc[-85:].max())
+                    spy_dd = (spy_close - spy_high_85) / spy_high_85
+
                     ema21_spy = float(closes.ewm(span=21, adjust=False).mean().iloc[-1])
-                    ema50_spy_series = closes.ewm(span=50, adjust=False).mean()
-                    ema50_spy = float(ema50_spy_series.iloc[-1])
-                    ema50_spy_prev10 = float(ema50_spy_series.iloc[-10])
+                    ema50_series = closes.ewm(span=50, adjust=False).mean()
+                    ema50_spy = float(ema50_series.iloc[-1])
+                    ema50_prev10 = float(ema50_series.iloc[-10])
                     sma85_spy = float(closes.rolling(85).mean().iloc[-1])
 
-                    # 2022 Ayı Piyasası Tespiti:
-                    # SPY'ın 50 günlük ortalaması aşağı eğimliyse (düşüyorsa) VEYA
-                    # EMA50 < SMA85 ise VEYA Sektör Genişliği %35'in altındaysa:
-                    if ema50_spy < sma85_spy or ema50_spy < ema50_spy_prev10 or spy_close < sma85_spy:
-                        spy_in_bear_trend = True
+                    if ema50_spy < sma85_spy or ema50_spy < ema50_prev10 or spy_close < sma85_spy:
+                        spy_in_bear_structure = True
 
-        # KÜRESEL AYI KALKANI:
-        # Eğer hem SPY düşüş yapısındaysa HEM DE teknoloji hisselerinin %50'sinden azı boğadaysa (2022),
-        # Ölü Kedi Sıçramalarına (Bear Market Rally) girmeyi TAMAMEN ENGELLE!
-        if spy_in_bear_trend and universe_breadth < 0.55:
-            return []
-
-        # Sektörün %35'inden azı yükselişteyse (Ağır sektör satışı), işlem açma!
-        if universe_breadth < 0.35:
-            return []
+                    # Süper Boğa: SPY 85 günlük zirvesinin %4 yakınında, EMA21 > EMA50 > SMA85
+                    if (
+                        not spy_in_bear_structure
+                        and ema21_spy >= ema50_spy
+                        and spy_dd >= -0.045
+                    ):
+                        spy_strong_bull = True
 
         regime_str = str(getattr(market_regime, "value", market_regime or "")).upper()
 
-        # ====================================================
-        # 3. SCAN ALL SYMBOLS WITH STOCK-LEVEL STRUCTURE FILTER
-        # ====================================================
+        # VİTES SEÇİMİ:
+        if spy_in_bear_structure or breadth < 0.40 or "BEAR" in regime_str:
+            gear = "BEAR_DEFENSE"
+        elif spy_strong_bull and breadth >= 0.58 and "BULL" in regime_str:
+            gear = "SUPER_BULL"
+        else:
+            gear = "CHOP_SNIPER"
+
+        return gear, breadth, market_regime, market_regime_result
+
+    # ========================================================
+    # BUILD RANKED CANDIDATES
+    # ========================================================
+
+    def build_ranked_candidates(self, timestamp, next_timestamp, prepared_data):
+        candidates = []
+
+        gear, breadth, market_regime, market_regime_result = self.detect_market_gear(
+            timestamp, prepared_data
+        )
+
+        non_tradable = set(
+            getattr(self.settings, "non_tradable_symbols", ("SPY", "TSLA"))
+        )
+        defensive_symbols = set(
+            getattr(self.settings, "defensive_symbols", ("LLY", "XOM", "UNH"))
+        )
+        regime_str = str(getattr(market_regime, "value", market_regime or "")).upper()
+
+        # Eğer KALE MODUNDAYSAK (2022) ve genel genişlik çok düşükse (< %35),
+        # sadece Defansif Liderlere (LLY, XOM) izin ver, teknolojiye tamamen kapıyı kapat!
         for symbol, symbol_df in prepared_data.items():
-            if symbol.upper() in non_tradable:
+            sym_upper = symbol.upper()
+            if sym_upper in non_tradable:
                 continue
             if timestamp not in symbol_df.index or next_timestamp not in symbol_df.index:
                 continue
@@ -266,17 +290,38 @@ class BacktestEngine:
             if len(history) < 65:
                 continue
 
-            # HİSSE BAZLI YÜKSELİŞ YAPISI KONTROLÜ (2022 & 2023 TESTERE KALKANI):
-            # 1. Hissenin EMA 21 değeri EMA 50 değerinin üzerinde olmalı (Gerçek Orta Vadeli Trend)
-            # 2. Hissenin EMA 50 değeri son 5 günde yükseliyor olmalı (Düşen EMA 50'ye kafa atan sahte sıçramaları eler!)
             last_bar = history.iloc[-1]
+            close_val = float(last_bar["close"])
             ema21_val = float(last_bar["ema_21"])
             ema50_val = float(last_bar["ema_50"])
             ema50_prev5 = float(history["ema_50"].iloc[-6])
             sma65_val = float(history["close"].iloc[-65:].mean())
 
-            if ema21_val <= ema50_val or ema50_val < ema50_prev5 or float(last_bar["close"]) < sma65_val:
-                continue
+            # ====================================================
+            # VİTESE GÖRE HİSSE SEÇİM KURALLARI
+            # ====================================================
+            if gear == "BEAR_DEFENSE":
+                # VİTES 1 (2022 Kriz Modu):
+                # Sadece Sağlık/Enerji (LLY, XOM) hisseleri VEYA
+                # kendi 60 günlük zirvesinin %3 yakınında olan mutlak liderler geçebilir!
+                high_60d = float(history["high"].iloc[-60:].max())
+                is_defensive = sym_upper in defensive_symbols
+                if not is_defensive and breadth < 0.50:
+                    continue
+                if ema21_val <= ema50_val or ema50_val <= ema50_prev5 or close_val < sma65_val:
+                    continue
+                if close_val < high_60d * 0.96:
+                    continue
+
+            elif gear == "CHOP_SNIPER":
+                # VİTES 2 (2023 V3.8 Modu - +%31.58 Yapan Sıkı Filtre):
+                if ema21_val <= ema50_val or ema50_val < ema50_prev5 or close_val < sma65_val:
+                    continue
+
+            else:
+                # VİTES 3 (2024/2025 V3.7 SUPER_BULL Modu - +%200.88 Yapan Saf Güç):
+                # Süper boğada SMA65 veya EMA50 eğim engeli koyma, tüm ralli kırılımlarını yakala!
+                pass
 
             signal_result = self.signal_engine.evaluate(
                 symbol=symbol,
@@ -319,13 +364,22 @@ class BacktestEngine:
                 self.fundamental_rejected_count += 1
                 continue
 
-            # SIDEWAYS veya Zayıf Genişlik (< %55) durumunda sadece en elit sinyallere gir!
-            if "SIDEWAYS" in regime_str or universe_breadth < 0.55 or spy_in_bear_trend:
-                if alpha_result.final_score < 84.0 or signal_result.score < 78:
+            if gear == "BEAR_DEFENSE":
+                if alpha_result.final_score < 82.0 or signal_result.score < 76:
+                    continue
+            elif "SIDEWAYS" in regime_str:
+                if alpha_result.final_score < 82.0 or signal_result.score < 78:
                     continue
 
             if fundamental_score is None and signal_result.score < 74:
                 continue
+
+            # Ayı piyasasında defansif liderlere (LLY, XOM), Süper Boğada ise High-Beta Teknolojiye öncelik!
+            sector_priority = 0.0
+            if gear == "BEAR_DEFENSE" and sym_upper in defensive_symbols:
+                sector_priority = 8.0
+            elif gear == "SUPER_BULL" and sym_upper not in defensive_symbols:
+                sector_priority = 4.0
 
             candidates.append({
                 "symbol": symbol,
@@ -336,11 +390,14 @@ class BacktestEngine:
                 "fundamental_context": fundamental_context,
                 "fundamental_factor": fundamental_factor,
                 "alpha_result": alpha_result,
-                "universe_breadth": universe_breadth,
+                "market_gear": gear,
+                "universe_breadth": breadth,
+                "rank_score": alpha_result.final_score + sector_priority,
             })
 
         candidates.sort(
             key=lambda c: (
+                c["rank_score"],
                 c["alpha_result"].final_score,
                 c["alpha_result"].technical_score,
                 c["symbol"],
@@ -349,6 +406,10 @@ class BacktestEngine:
         )
 
         return candidates
+
+    # ========================================================
+    # TRY OPEN POSITION
+    # ========================================================
 
     def try_open_position(
         self,
@@ -359,7 +420,7 @@ class BacktestEngine:
         prices,
         signal_result=None,
         alpha_result=None,
-        universe_breadth: float = 1.0,
+        market_gear: str = "SUPER_BULL",
     ) -> bool:
 
         self.trade_attempt_count += 1
@@ -446,12 +507,14 @@ class BacktestEngine:
         )
 
         # ====================================================
-        # REJİM DUYARLI POZİSYON BÜYÜKLÜĞÜ (2023 DRAW-DOWN KORUMASI)
+        # VİTESE GÖRE DİNAMİK MERMİ BÜYÜKLÜĞÜ
         # ====================================================
-        # Eğer piyasa genişliği henüz tam güçte değilse (< %60),
-        # efektif özsermayeyi %65 olarak gönderip pozisyon riskini otomatik küçült!
-        # Tam boğa piyasasında (Genişlik >= %60) ise %100 tam güçle vur!
-        sizing_equity = equity if universe_breadth >= 0.60 else (equity * 0.65)
+        if market_gear == "BEAR_DEFENSE":
+            sizing_equity = equity * 0.65  # 2022 Krizinde savunma mermisi
+        elif market_gear == "CHOP_SNIPER":
+            sizing_equity = equity * 0.85  # 2023 Toparlanmasında dengeli güçlü mermi
+        else:
+            sizing_equity = equity * 1.00  # 2024/2025 Süper Boğada %100 Tam Güç!
 
         try:
             position_size = self.position_sizer.calculate(
@@ -517,6 +580,7 @@ class BacktestEngine:
         last_bar = history.iloc[-1]
 
         entry_metrics = {
+            "market_gear": market_gear,
             "rsi": float(last_bar["rsi"]) if ("rsi" in last_bar and pd.notna(last_bar["rsi"])) else 0.0,
             "volume_ratio": float(last_bar["volume_ratio"]) if ("volume_ratio" in last_bar and pd.notna(last_bar["volume_ratio"])) else 0.0,
             "macd": float(last_bar["macd"]) if ("macd" in last_bar and pd.notna(last_bar["macd"])) else 0.0,
@@ -586,6 +650,10 @@ class BacktestEngine:
         )
 
         return True
+
+    # ========================================================
+    # MANAGE POSITION V4.0 (VİTESE GÖRE ADAPTİF ÇIKIŞ!)
+    # ========================================================
 
     def manage_position(self, symbol, timestamp, bar) -> bool:
         if symbol not in self.portfolio.positions:
@@ -660,33 +728,65 @@ class BacktestEngine:
 
         position.current_r = (close - position.entry_price) / initial_risk
         high_r = (high - position.entry_price) / initial_risk
+        peak_r = (position.highest_price - position.entry_price) / initial_risk
+
+        # İşlemin açıldığı vitesi oku:
+        trade_gear = position.entry_metrics.get("market_gear", "SUPER_BULL")
 
         # ====================================================
-        # KUSURSUZ TIME-STOP (27 GÜNLÜK COIN ERİMESİNİ BİTİRİR!)
+        # VİTESE GÖRE DİNAMİK TIME-STOP & BREAK-EVEN AYARLARI
         # ====================================================
-        time_stop_bars = int(getattr(self.settings, "time_stop_bars", 6))
         try:
             days_held = (timestamp - position.entry_time).total_seconds() / 86400.0
         except Exception:
             days_held = 0.0
 
-        # Eğer pozisyon 6+ gündür açıksa, hâlâ stop'u maliyete (Break-Even) çekilememişse
-        # ve şu an zarardaysa (-0.12R ve altı), geçmişte kaç R gördüğüne bakmadan kapat!
-        if (
-            days_held >= time_stop_bars
-            and position.stop_price < position.entry_price
-            and position.current_r <= -0.12
-        ):
-            self.portfolio.close_position(
-                symbol=symbol,
-                exit_price=close,
-                exit_time=timestamp,
-                exit_reason="STOP",
-            )
-            self.unregister_position_risk(symbol)
-            self.stop_hit_count += 1
-            self.cooldowns[symbol] = timestamp
-            return True
+        if trade_gear in ("BEAR_DEFENSE", "CHOP_SNIPER"):
+            # VİTES 1 & 2 (2022 ve 2023 V3.8 Modu: +%31.58 yapan sıkı vur-kaç kuralları!)
+            active_be_at_r = 0.65
+            active_be_offset_r = 0.20
+            active_lock_at_r = 1.25
+            active_lock_r = 0.70
+
+            # 6 gün sonunda hâlâ Break-Even olamamış ve zararda olanı anında kes (Peak_R bakmadan!)
+            if (
+                days_held >= 6.0
+                and position.stop_price < position.entry_price
+                and position.current_r <= -0.12
+            ):
+                self.portfolio.close_position(
+                    symbol=symbol,
+                    exit_price=close,
+                    exit_time=timestamp,
+                    exit_reason="STOP",
+                )
+                self.unregister_position_risk(symbol)
+                self.stop_hit_count += 1
+                self.cooldowns[symbol] = timestamp
+                return True
+        else:
+            # VİTES 3 (2024 ve 2025 V3.7 SUPER_BULL Modu: +%200.88 yapan mega-trend kuralları!)
+            active_be_at_r = float(getattr(self.settings, "break_even_at_r", 0.75))
+            active_be_offset_r = float(getattr(self.settings, "break_even_offset_r", 0.20))
+            active_lock_at_r = float(getattr(self.settings, "lock_profit_at_r", 1.30))
+            active_lock_r = float(getattr(self.settings, "lock_profit_r", 0.70))
+
+            if (
+                days_held >= 7.0
+                and peak_r < 0.40
+                and position.stop_price < position.entry_price
+                and position.current_r <= -0.15
+            ):
+                self.portfolio.close_position(
+                    symbol=symbol,
+                    exit_price=close,
+                    exit_time=timestamp,
+                    exit_reason="STOP",
+                )
+                self.unregister_position_risk(symbol)
+                self.stop_hit_count += 1
+                self.cooldowns[symbol] = timestamp
+                return True
 
         atr = None
         if "atr" in bar:
@@ -705,31 +805,19 @@ class BacktestEngine:
         new_stop = position.stop_price
         management_reason = None
 
-        # ====================================================
-        # 1. BREAK EVEN PLUS (+0.65R'DE +0.20R GARANTİ KÂR)
-        # ====================================================
-        break_even_at_r = float(getattr(self.settings, "break_even_at_r", 0.65))
-        break_even_offset_r = float(getattr(self.settings, "break_even_offset_r", 0.20))
-        be_stop = position.entry_price + (initial_risk * break_even_offset_r)
-
-        if high_r >= break_even_at_r and position.stop_price < be_stop:
+        # 1. ADAPTIVE BREAK-EVEN PLUS
+        be_stop = position.entry_price + (initial_risk * active_be_offset_r)
+        if high_r >= active_be_at_r and position.stop_price < be_stop:
             new_stop = max(new_stop, be_stop)
             management_reason = "BREAK_EVEN_PLUS"
 
-        # ====================================================
-        # 2. PROFIT LOCK (+1.28R'DE +0.70R KÂR KİLİDİ)
-        # ====================================================
-        lock_profit_at_r = float(getattr(self.settings, "lock_profit_at_r", 1.28))
-        lock_profit_r = float(getattr(self.settings, "lock_profit_r", 0.70))
-        lock_stop = position.entry_price + (initial_risk * lock_profit_r)
-
-        if high_r >= lock_profit_at_r and position.stop_price < lock_stop:
+        # 2. ADAPTIVE PROFIT LOCK
+        lock_stop = position.entry_price + (initial_risk * active_lock_r)
+        if high_r >= active_lock_at_r and position.stop_price < lock_stop:
             new_stop = max(new_stop, lock_stop)
             management_reason = "PROFIT_LOCK"
 
-        # ====================================================
-        # 3. ATR TRAILING & PARABOLIC LOCK ($755+ PNL ENGINE)
-        # ====================================================
+        # 3. ATR TRAILING & PARABOLIC LOCK
         trailing_start_at_r = float(getattr(self.settings, "trailing_start_at_r", 1.70))
         trailing_atr_multiplier = float(getattr(self.settings, "trailing_atr_multiplier", 1.45))
 
@@ -878,7 +966,7 @@ class BacktestEngine:
                         prices=current_prices,
                         signal_result=candidate["signal"],
                         alpha_result=candidate["alpha_result"],
-                        universe_breadth=candidate.get("universe_breadth", 1.0),
+                        market_gear=candidate.get("market_gear", "SUPER_BULL"),
                     )
 
             self.portfolio.record_equity(
