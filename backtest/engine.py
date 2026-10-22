@@ -179,16 +179,10 @@ class BacktestEngine:
         return getattr(factor, name, default)
 
     # ========================================================
-    # V4.0 CHAMELEON STATE DETECTOR (3 OTOMATİK VİTES)
+    # V4.1 CHAMELEON STATE DETECTOR (3 OTOMATİK VİTES)
     # ========================================================
 
     def detect_market_gear(self, timestamp, prepared_data):
-        """
-        Piyasanın o günkü röntgenini çeker ve 3 vitesten birini seçer:
-        1. 'BEAR_DEFENSE' (2022 Modu - Sadece Defansif/Sağlık/Enerji veya Ultra-Liderler)
-        2. 'CHOP_SNIPER'  (2023 V3.8 Modu - Sıkı Filtre + Hızlı Kâr Kilidi)
-        3. 'SUPER_BULL'   (2024/2025 V3.7 Modu - +%200'lük Tam Güç Mega-Trend)
-        """
         non_tradable = set(
             getattr(self.settings, "non_tradable_symbols", ("SPY", "TSLA"))
         )
@@ -238,7 +232,6 @@ class BacktestEngine:
                     if ema50_spy < sma85_spy or ema50_spy < ema50_prev10 or spy_close < sma85_spy:
                         spy_in_bear_structure = True
 
-                    # Süper Boğa: SPY 85 günlük zirvesinin %4 yakınında, EMA21 > EMA50 > SMA85
                     if (
                         not spy_in_bear_structure
                         and ema21_spy >= ema50_spy
@@ -248,7 +241,6 @@ class BacktestEngine:
 
         regime_str = str(getattr(market_regime, "value", market_regime or "")).upper()
 
-        # VİTES SEÇİMİ:
         if spy_in_bear_structure or breadth < 0.40 or "BEAR" in regime_str:
             gear = "BEAR_DEFENSE"
         elif spy_strong_bull and breadth >= 0.58 and "BULL" in regime_str:
@@ -277,12 +269,17 @@ class BacktestEngine:
         )
         regime_str = str(getattr(market_regime, "value", market_regime or "")).upper()
 
-        # Eğer KALE MODUNDAYSAK (2022) ve genel genişlik çok düşükse (< %35),
-        # sadece Defansif Liderlere (LLY, XOM) izin ver, teknolojiye tamamen kapıyı kapat!
         for symbol, symbol_df in prepared_data.items():
             sym_upper = symbol.upper()
             if sym_upper in non_tradable:
                 continue
+
+            # V4.1 SEKTÖR İZOLASYONU:
+            # XOM (Enerji) sadece kriz ve testere modlarında (2022/2023) kalkan olarak çalışır!
+            # SUPER_BULL (Teknoloji Boğası) modunda XOM'un teknoloji devlerinden kontenjan çalmasını engelle!
+            if gear == "SUPER_BULL" and sym_upper == "XOM":
+                continue
+
             if timestamp not in symbol_df.index or next_timestamp not in symbol_df.index:
                 continue
 
@@ -297,13 +294,7 @@ class BacktestEngine:
             ema50_prev5 = float(history["ema_50"].iloc[-6])
             sma65_val = float(history["close"].iloc[-65:].mean())
 
-            # ====================================================
-            # VİTESE GÖRE HİSSE SEÇİM KURALLARI
-            # ====================================================
             if gear == "BEAR_DEFENSE":
-                # VİTES 1 (2022 Kriz Modu):
-                # Sadece Sağlık/Enerji (LLY, XOM) hisseleri VEYA
-                # kendi 60 günlük zirvesinin %3 yakınında olan mutlak liderler geçebilir!
                 high_60d = float(history["high"].iloc[-60:].max())
                 is_defensive = sym_upper in defensive_symbols
                 if not is_defensive and breadth < 0.50:
@@ -314,14 +305,8 @@ class BacktestEngine:
                     continue
 
             elif gear == "CHOP_SNIPER":
-                # VİTES 2 (2023 V3.8 Modu - +%31.58 Yapan Sıkı Filtre):
                 if ema21_val <= ema50_val or ema50_val < ema50_prev5 or close_val < sma65_val:
                     continue
-
-            else:
-                # VİTES 3 (2024/2025 V3.7 SUPER_BULL Modu - +%200.88 Yapan Saf Güç):
-                # Süper boğada SMA65 veya EMA50 eğim engeli koyma, tüm ralli kırılımlarını yakala!
-                pass
 
             signal_result = self.signal_engine.evaluate(
                 symbol=symbol,
@@ -374,12 +359,11 @@ class BacktestEngine:
             if fundamental_score is None and signal_result.score < 74:
                 continue
 
-            # Ayı piyasasında defansif liderlere (LLY, XOM), Süper Boğada ise High-Beta Teknolojiye öncelik!
             sector_priority = 0.0
             if gear == "BEAR_DEFENSE" and sym_upper in defensive_symbols:
                 sector_priority = 8.0
             elif gear == "SUPER_BULL" and sym_upper not in defensive_symbols:
-                sector_priority = 4.0
+                sector_priority = 5.0
 
             candidates.append({
                 "symbol": symbol,
@@ -506,15 +490,12 @@ class BacktestEngine:
             else self.portfolio.cash
         )
 
-        # ====================================================
-        # VİTESE GÖRE DİNAMİK MERMİ BÜYÜKLÜĞÜ
-        # ====================================================
         if market_gear == "BEAR_DEFENSE":
-            sizing_equity = equity * 0.65  # 2022 Krizinde savunma mermisi
+            sizing_equity = equity * 0.65
         elif market_gear == "CHOP_SNIPER":
-            sizing_equity = equity * 0.85  # 2023 Toparlanmasında dengeli güçlü mermi
+            sizing_equity = equity * 0.85
         else:
-            sizing_equity = equity * 1.00  # 2024/2025 Süper Boğada %100 Tam Güç!
+            sizing_equity = equity * 1.00
 
         try:
             position_size = self.position_sizer.calculate(
@@ -652,7 +633,7 @@ class BacktestEngine:
         return True
 
     # ========================================================
-    # MANAGE POSITION V4.0 (VİTESE GÖRE ADAPTİF ÇIKIŞ!)
+    # MANAGE POSITION V4.1
     # ========================================================
 
     def manage_position(self, symbol, timestamp, bar) -> bool:
@@ -728,27 +709,20 @@ class BacktestEngine:
 
         position.current_r = (close - position.entry_price) / initial_risk
         high_r = (high - position.entry_price) / initial_risk
-        peak_r = (position.highest_price - position.entry_price) / initial_risk
 
-        # İşlemin açıldığı vitesi oku:
         trade_gear = position.entry_metrics.get("market_gear", "SUPER_BULL")
 
-        # ====================================================
-        # VİTESE GÖRE DİNAMİK TIME-STOP & BREAK-EVEN AYARLARI
-        # ====================================================
         try:
             days_held = (timestamp - position.entry_time).total_seconds() / 86400.0
         except Exception:
             days_held = 0.0
 
         if trade_gear in ("BEAR_DEFENSE", "CHOP_SNIPER"):
-            # VİTES 1 & 2 (2022 ve 2023 V3.8 Modu: +%31.58 yapan sıkı vur-kaç kuralları!)
             active_be_at_r = 0.65
             active_be_offset_r = 0.20
             active_lock_at_r = 1.25
             active_lock_r = 0.70
 
-            # 6 gün sonunda hâlâ Break-Even olamamış ve zararda olanı anında kes (Peak_R bakmadan!)
             if (
                 days_held >= 6.0
                 and position.stop_price < position.entry_price
@@ -765,15 +739,15 @@ class BacktestEngine:
                 self.cooldowns[symbol] = timestamp
                 return True
         else:
-            # VİTES 3 (2024 ve 2025 V3.7 SUPER_BULL Modu: +%200.88 yapan mega-trend kuralları!)
-            active_be_at_r = float(getattr(self.settings, "break_even_at_r", 0.75))
-            active_be_offset_r = float(getattr(self.settings, "break_even_offset_r", 0.20))
-            active_lock_at_r = float(getattr(self.settings, "lock_profit_at_r", 1.30))
-            active_lock_r = float(getattr(self.settings, "lock_profit_r", 0.70))
+            # SUPER_BULL V4.1: 0.68R Break-Even (AVGO +0.70R işlemini kurtarır!)
+            # ve 7. günde Peak_R muafiyeti olmadan Time-Stop (8 günlük MU erimesini kurtarır!)
+            active_be_at_r = 0.68
+            active_be_offset_r = 0.22
+            active_lock_at_r = 1.28
+            active_lock_r = 0.72
 
             if (
                 days_held >= 7.0
-                and peak_r < 0.40
                 and position.stop_price < position.entry_price
                 and position.current_r <= -0.15
             ):
