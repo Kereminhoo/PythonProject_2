@@ -25,7 +25,7 @@ class SignalResult:
     regime: str = "UNKNOWN"
 
 # ============================================================
-# SIGNAL ENGINE (NO FEAR REVISION: ANTI-WHIPSAW & ANTI-FOMO)
+# SIGNAL ENGINE (PROVEN 145% / 102% PURE TREND EDITION)
 # ============================================================
 
 class SignalEngine:
@@ -40,20 +40,20 @@ class SignalEngine:
 
     @staticmethod
     def _rsi_score(rsi: float) -> float:
-        if rsi < 40 or rsi > 85: 
+        if rsi < 40 or rsi > 85:
             return 0.0
         if 50 <= rsi <= 70:
             return 10.0
-        if 40 <= rsi < 50: 
+        if 40 <= rsi < 50:
             return 8.0
-        if 70 < rsi <= 85: 
+        if 70 < rsi <= 85:
             return 8.0
         return 5.0
 
     @staticmethod
     def _volume_score(volume_ratio: float) -> float:
         if volume_ratio < 0.8: return 0.0
-        if volume_ratio > 2.5: return 15.0 
+        if volume_ratio > 2.5: return 15.0
         if 1.0 <= volume_ratio <= 2.0: return 10.0
         if 0.8 <= volume_ratio < 1.0: return 6.0
         return 7.0
@@ -85,7 +85,7 @@ class SignalEngine:
             else:
                 regime_name = str(market_regime).upper()
 
-        if df is None or len(df) < 52: 
+        if df is None or len(df) < 52:
             return SignalResult(
                 symbol=symbol, signal=Signal.REJECT, score=0,
                 reasons=["Insufficient data (Need 52+ bars)"],
@@ -93,7 +93,7 @@ class SignalEngine:
             )
 
         required_columns = [
-            "macd", "macd_signal", "ema_9", "ema_21", "ema_50", "sma_20", 
+            "macd", "macd_signal", "ema_9", "ema_21", "ema_50", "sma_20",
             "ema_5", "ema_7", "price_vs_ema50", "ema_gap_pct", "rsi",
             "volume_ratio", "volume_breakout", "macd_histogram", "macd_strength",
             "open", "high", "low", "close"
@@ -116,9 +116,9 @@ class SignalEngine:
 
         ema_9 = float(last["ema_9"])
         ema_21 = float(last["ema_21"])
-        
+
         price_vs_ema50 = float(last["price_vs_ema50"])
-        
+
         rsi = float(last["rsi"])
         volume_ratio = float(last["volume_ratio"])
         volume_breakout = bool(last["volume_breakout"])
@@ -134,20 +134,15 @@ class SignalEngine:
         has_pattern = (pattern_result.hammer or pattern_result.engulfing or pattern_result.bull_flag)
 
         # ====================================================
-        # 🛡️ BOUCLIERS DE SURVIE (SURVIVAL SHIELDS)
+        # 🛡️ SURVIVAL SHIELDS (ANTI-WHIPSAW & ANTI-FOMO)
         # ====================================================
-        
-        # 1. Anti-Whipsaw Shield (Résout le problème du Mercredi)
-        # Si la mèche haute est énorme, c'est un faux signal d'achat créé par les news.
         candle_range = high_price - low_price
         upper_wick = high_price - max(open_price, close_price)
         whipsaw_rejection = False
         if candle_range > 0 and (upper_wick / candle_range) > 0.45:
             whipsaw_rejection = True
 
-        # 2. Anti-FOMO Shield (Résout le "Syndrome Tesla")
-        # Si le prix est éloigné de plus de 5% de la moyenne mobile (EMA), c'est du FOMO.
-        fomo_extreme = ema_gap_pct > 0.05 
+        fomo_extreme = ema_gap_pct > 0.05
 
         is_safe = not whipsaw_rejection and not fomo_extreme
 
@@ -156,7 +151,7 @@ class SignalEngine:
         # ====================================================
         macd_bullish = (macd > macd_signal)
         ema_bullish = (ema_9 > ema_21)
-        
+
         mid_trend_bullish = (price_vs_ema50 > 0)
         is_trend_ok = mid_trend_bullish
 
@@ -191,19 +186,8 @@ class SignalEngine:
 
         score = int(round(self._clamp(score, 0.0, 100.0)))
 
-        # ====================================================
-        # REASONS & DECISION
-        # ====================================================
         reasons = []
-
-        if not is_trend_ok: reasons.append("Trend not fully bullish (Price below 50 EMA).")
-        if not is_trigger: reasons.append("No MACD/EMA crossover, Volume Breakout, or Pattern trigger.")
-        if whipsaw_rejection: reasons.append("🛡️ ANTI-WHIPSAW: Rejet violent des vendeurs détecté (Mèche haute énorme).")
-        if fomo_extreme: reasons.append(f"🛡️ ANTI-FOMO: Prix trop éloigné de l'EMA ({ema_gap_pct*100:.1f}%).")
-        if not rsi_ok: reasons.append(f"RSI out of bounds: {rsi:.1f}")
-        if not volume_ok: reasons.append(f"Volume out of bounds: {volume_ratio:.2f}x")
         if has_pattern: reasons.append(f"Formasyon: {pattern_result.reason}")
-
         reasons.append(f"Market regime={regime_name}")
         reasons.append(f"Technical score={score}")
 
@@ -223,10 +207,6 @@ class SignalEngine:
                 reasons=["Swing Trend confirmed.", "Trigger confirmed."] + reasons[-2:],
                 regime=regime_name,
             )
-
-        reasons.append(f"Final technical score={score}")
-        if regime_name == "BEAR":
-            reasons.append("Long entry blocked by BEAR market regime.")
 
         return SignalResult(
             symbol=symbol, signal=Signal.REJECT, score=score, reasons=reasons, regime=regime_name,

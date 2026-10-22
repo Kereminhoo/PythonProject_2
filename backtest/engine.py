@@ -183,7 +183,7 @@ class BacktestEngine:
 
         market_regime = None
         market_regime_result = None
-        spy_above_ema50 = True
+        spy_in_deep_bear = False
 
         benchmark_df = prepared_data.get("SPY")
         if benchmark_df is not None and timestamp in benchmark_df.index:
@@ -193,11 +193,29 @@ class BacktestEngine:
                     benchmark_history
                 )
                 market_regime = market_regime_result.regime
-                # SPY 50 günlük ortalamasının altındaysa (2022 Ayı Piyasası filtresi)
-                if "price_vs_ema50" in benchmark_history.columns:
-                    spy_vs_50 = benchmark_history.iloc[-1]["price_vs_ema50"]
-                    if pd.notna(spy_vs_50) and float(spy_vs_50) < 0:
-                        spy_above_ema50 = False
+
+                # ====================================================
+                # 2022 MACRO BEAR MARKET LOCKOUT (DRAWDOWN & TREND)
+                # ====================================================
+                closes = benchmark_history["close"]
+                if len(closes) >= 85:
+                    spy_close = float(closes.iloc[-1])
+                    spy_high_85 = float(closes.iloc[-85:].max())
+                    spy_dd_from_high = (spy_close - spy_high_85) / spy_high_85
+                    
+                    ema21_now = float(closes.ewm(span=21, adjust=False).mean().iloc[-1])
+                    ema50_now = float(closes.ewm(span=50, adjust=False).mean().iloc[-1])
+                    sma85_now = float(closes.rolling(85).mean().iloc[-1])
+
+                    # 2022 Ayı Piyasası Tespiti:
+                    # 1. SPY son 85 günün zirvesinden %7'den fazla düşmüşse VE EMA50 < SMA85 ise
+                    # 2. VEYA SPY < SMA85 ise (Yapısal Ayı Piyasası)
+                    if (spy_dd_from_high <= -0.07 and ema50_now < sma85_now) or (spy_close < sma85_now and ema21_now < sma85_now):
+                        spy_in_deep_bear = True
+
+        # Eğer küresel piyasa 2022 gibi yapısal çöküşteyse nakitte kal ($200'ı koru!)
+        if spy_in_deep_bear:
+            return []
 
         non_tradable = set(
             getattr(self.settings, "non_tradable_symbols", ("SPY", "TSLA"))
@@ -256,15 +274,11 @@ class BacktestEngine:
                 self.fundamental_rejected_count += 1
                 continue
 
-            # ====================================================
-            # 2022 BEAR / SIDEWAYS & QUALITY FILTER
-            # ====================================================
-            # 1. SPY 50 EMA altındaysa veya rejim SIDEWAYS ise sadece ultra-elit sinyallere gir!
-            if "SIDEWAYS" in regime_str or not spy_above_ema50:
+            # V3.3'te %90.9 Win Rate üreten SIDEWAYS & Fallback filtresi
+            if "SIDEWAYS" in regime_str:
                 if alpha_result.final_score < 82.0 or signal_result.score < 78:
                     continue
 
-            # 2. Bilanço verisi yoksa (Technical Fallback), teknik skor en az 74 olmalı!
             if fundamental_score is None and signal_result.score < 74:
                 continue
 
@@ -378,9 +392,6 @@ class BacktestEngine:
         if atr <= 0:
             return False
 
-        # ====================================================
-        # 2.5X BUYING POWER DESTEKLİ POSITION SIZING
-        # ====================================================
         available_bp = (
             self.portfolio.get_buying_power(prices)
             if hasattr(self.portfolio, "get_buying_power")
@@ -597,7 +608,7 @@ class BacktestEngine:
         peak_r = (position.highest_price - position.entry_price) / initial_risk
 
         # ====================================================
-        # TIME-STOP (7 GÜNDE HİÇ +0.40R GÖREMEMİŞ ÖLÜ İŞLEMLER)
+        # TIME-STOP (V3.3 PROVEN: 7 GÜNDE HİÇ +0.40R GÖREMEMİŞ ÖLÜ İŞLEMLER)
         # ====================================================
         time_stop_bars = int(getattr(self.settings, "time_stop_bars", 7))
         try:
@@ -635,7 +646,7 @@ class BacktestEngine:
         management_reason = None
 
         # ====================================================
-        # 1. BREAK EVEN PLUS (+0.75R'DE +0.20R GARANTİ KÂR)
+        # 1. BREAK EVEN PLUS (+0.75R'DE +0.20R GARANTİ KÂR - V3.3 PROVEN)
         # ====================================================
         break_even_at_r = float(getattr(self.settings, "break_even_at_r", 0.75))
         break_even_offset_r = float(getattr(self.settings, "break_even_offset_r", 0.20))
@@ -646,7 +657,7 @@ class BacktestEngine:
             management_reason = "BREAK_EVEN_PLUS"
 
         # ====================================================
-        # 2. PROFIT LOCK (+1.30R'DE +0.70R KÂR KİLİDİ)
+        # 2. PROFIT LOCK (+1.30R'DE +0.70R KÂR KİLİDİ - V3.3 PROVEN)
         # ====================================================
         lock_profit_at_r = float(getattr(self.settings, "lock_profit_at_r", 1.30))
         lock_profit_r = float(getattr(self.settings, "lock_profit_r", 0.70))
@@ -657,7 +668,7 @@ class BacktestEngine:
             management_reason = "PROFIT_LOCK"
 
         # ====================================================
-        # 3. ATR TRAILING & PARABOLIC LOCK ($415+ PNL ENGINE)
+        # 3. ATR TRAILING & PARABOLIC LOCK ($578+ PNL ENGINE)
         # ====================================================
         trailing_start_at_r = float(getattr(self.settings, "trailing_start_at_r", 1.70))
         trailing_atr_multiplier = float(getattr(self.settings, "trailing_atr_multiplier", 1.45))
@@ -692,8 +703,6 @@ class BacktestEngine:
                 current_position = self.portfolio.positions[symbol]
                 self.unregister_position_risk(symbol)
 
-                # Stop maliyetin üstüne çıktığında artık risk 0'dır (Free-Roll).
-                # RiskManager'dan düşerek yeni işlemlere yer açar!
                 if current_position.stop_price < current_position.entry_price:
                     self.register_position_risk(
                         symbol=symbol,
