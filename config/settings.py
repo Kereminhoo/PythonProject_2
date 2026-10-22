@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ============================================================
-# SETTINGS V3.7 (1000$+ TARGET - PROVEN V3.3 CORE + 2022 SHIELD)
+# SETTINGS V3.8 (ALL-WEATHER FORTRESS & 1200$+ TARGET)
 # ============================================================
 
 @dataclass(frozen=True)
@@ -40,10 +40,9 @@ class Settings:
     daily_tp2_enabled: bool = False
 
     # ========================================================
-    # FULL-THROTTLE COMPOUNDING RISK (V3.7)
+    # FULL-THROTTLE COMPOUNDING RISK (V3.8)
     # ========================================================
 
-    # 2024 (%135) ve 2025 (%102) motorunu $1,000+ üzerine taşıyan %5.0 baz risk!
     max_risk_per_trade_pct: float = 0.050
     max_total_open_risk_pct: float = 0.180
     max_daily_loss_pct: float = 0.085
@@ -58,27 +57,28 @@ class Settings:
     use_fixed_target: bool = False
 
     # ========================================================
-    # V3.3 PROVEN TRAILING STOP (2024: +135%, 2025: +102%)
+    # V3.8 ADAPTIVE TRAILING STOP (SAVES 0.65R+ & RIDES 2024/2025)
     # ========================================================
 
-    # 0.75R'de +0.20R kâr kilidi (Erken boğulmayı önleyen kanıtlanmış altın oran!)
-    break_even_at_r: float = 0.75 
+    # 0.65R gören işlem (AVGO +0.70R, COIN +0.69R) asla -1R zarar yazamaz!
+    # Doğrudan +0.20R pozitif kâra kilitlenir!
+    break_even_at_r: float = 0.65 
     break_even_offset_r: float = 0.20
 
-    # +1.30R'de +0.70R kârı cebe kilitler
-    lock_profit_at_r: float = 1.30
+    # +1.28R'de +0.70R kârı cebe kilitler
+    lock_profit_at_r: float = 1.28
     lock_profit_r: float = 0.70
 
     # +1.70R'de ATR Trailing başlar
     trailing_start_at_r: float = 1.70
     trailing_atr_multiplier: float = 1.45
 
-    # Parabolik Zirve Kilidi ($578+ PnL üreten altın eşik: RSI 77.0)
+    # Parabolik Zirve Kilidi ($755+ PnL üreten altın eşik: RSI 77.0)
     parabolic_rsi_threshold: float = 77.0
     parabolic_atr_multiplier: float = 0.85
 
-    # Zaman Stobu: 7 gün sonunda hiç +0.40R görememiş ve eksedeki ölü işlemleri kapatır
-    time_stop_bars: int = 7
+    # Zaman Stobu: 6 gün sonunda hâlâ Break-Even olamamış ve eksedeki ölü işlemleri keser
+    time_stop_bars: int = 6
 
     trailing_only_moves_up: bool = True
 
